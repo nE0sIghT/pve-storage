@@ -69,34 +69,41 @@ sub iscsi_test_portal {
 }
 
 sub iscsi_discovery {
-    my ($portal) = @_;
+    my @portals = @_;
 
     check_iscsi_support ();
 
     my $res = {};
-    return $res if !iscsi_test_portal($portal); # fixme: raise exception here?
+    foreach my $portal (@portals)
+    {
+        next if !iscsi_test_portal($portal); # fixme: raise exception here?
 
-    my $cmd = [$ISCSIADM, '--mode', 'discovery', '--type', 'sendtargets', '--portal', $portal];
-    run_command($cmd, outfunc => sub {
-	my $line = shift;
+        my $cmd = [$ISCSIADM, '--mode', 'discovery', '--type', 'sendtargets', '--portal', $portal];
+        run_command($cmd, outfunc => sub {
+        my $line = shift;
 
-	if ($line =~ m/^((?:$IPV4RE|\[$IPV6RE\]):\d+)\,\S+\s+(\S+)\s*$/) {
-	    my $portal = $1;
-	    my $target = $2;
-	    # one target can have more than one portal (multipath).
-	    push @{$res->{$target}}, $portal;
-	}
-    });
+        if ($line =~ m/^((?:$IPV4RE|\[$IPV6RE\]):\d+)\,\S+\s+(\S+)\s*$/) {
+            my $portal = $1;
+            my $target = $2;
+            # one target can have more than one portal (multipath).
+            push @{$res->{$target}}, $portal;
+        }
+        });
+
+        # In case of multipath we want to exit on any portal available
+        last;
+    }
 
     return $res;
 }
 
 sub iscsi_login {
     my ($target, $portal_in) = @_;
+    my @portals = PVE::Storage::Plugin::get_portals($portal_in);
 
     check_iscsi_support();
 
-    eval { iscsi_discovery($portal_in); };
+    eval { iscsi_discovery(@portals); };
     warn $@ if $@;
 
     run_command([$ISCSIADM, '--mode', 'node', '--targetname',  $target, '--login']);
@@ -245,8 +252,8 @@ sub properties {
 	    type => 'string',
 	},
 	portal => {
-	    description => "iSCSI portal (IP or DNS name with optional port).",
-	    type => 'string', format => 'pve-storage-portal-dns',
+	    description => "iSCSI portal (IP or DNS name with optional port). Multiple portals can be separated by comma (for multipath).",
+	    type => 'string', format => 'pve-storage-portals-dns',
 	},
     };
 }
@@ -403,8 +410,13 @@ sub deactivate_storage {
 sub check_connection {
     my ($class, $storeid, $scfg) = @_;
 
-    my $portal = $scfg->{portal};
-    return iscsi_test_portal($portal);
+    my @portals = PVE::Storage::Plugin::get_portals($scfg->{portal});
+    foreach my $portal (@portals) {
+        my $result = iscsi_test_portal($portal);
+        return $result if $result;
+    }
+
+    return 0;
 }
 
 sub volume_resize {
