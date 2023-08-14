@@ -205,6 +205,13 @@ sub content_hash_to_string {
     return join(',', @cta);
 }
 
+sub get_portals {
+    my $portal_cfg = shift;
+    my $portals = [split(',', $portal_cfg)];
+    map { s/^\s+|\s+$//g; } @{$portals};
+    return $portals;
+}
+
 sub valid_content_types {
     my ($type) = @_;
 
@@ -299,6 +306,17 @@ sub verify_portal_dns {
 	die "value does not look like a valid portal address\n";
     }
     return $portal;
+}
+
+PVE::JSONSchema::register_format('pve-storage-portals-dns', \&verify_portals_dns);
+sub verify_portals_dns {
+    my ($portal_in, $noerr) = @_;
+
+    foreach my $portal (@{get_portals($portal_in)}) {
+	verify_portal_dns($portal, $noerr);
+    }
+
+    return $portal_in;
 }
 
 PVE::JSONSchema::register_format('pve-storage-content', \&verify_content);
